@@ -217,9 +217,11 @@ The audit process begins with the preparation of an audit file, which forms the 
      ```
      python audit_file_parser.py -audit /path/to/audit/file
      ```
+   - **Note**: The parser now supports both v2 and v3 CIS audit files. For v3 files, it can extract GUID-based registry settings.
 
 3. **Review the Output**:
    - Upon successful completion of the script, you'll find an Excel file in the `/src/Audit` directory. This file, which will have the same name as the input .audit file, contains the results of the script's operations.
+   - The Excel output will include a sheet named `GUID_REGISTRY_SETTING` if such items are present in the audit file. This sheet will contain a `GUID Reg Key` column detailing the specific GUID path for these settings.
 
 4. **Customize the Excel File**: 
    - Customize the Excel file according to your requirements. This custom file will serve as the input for the audit process. Save any changes you make.

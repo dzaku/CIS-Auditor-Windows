@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import argparse
 import sys
+import os
 
 # The regular expressions to extract required data
 regexes = {
@@ -15,6 +16,7 @@ regexes = {
     'audit_policy_subcategory': re.compile(r'audit_policy_subcategory\s+:\s+(.*?)\n'),
     'key_item': re.compile(r'key_item\s+:\s+(.*?)\n'),
     'right_type': re.compile(r'right_type\s+:\s+(.*?)\n'),
+    'guid_reg_key': re.compile(r'guid_reg_key\s+:\s+(.*?)\n'), # Extracts GUID-based registry keys, typically used in v3 CIS audit files
     # 'solution': re.compile(r'solution\s*:\s*(.+?)\n\s*Default Value:', re.DOTALL | re.IGNORECASE)
     'solution': re.compile(r'solution\s*:\s*(.+?)\n\s*reference', re.DOTALL | re.IGNORECASE)
 }
@@ -32,7 +34,8 @@ data_dict = {
     "AUDIT_POLICY_SUBCATEGORY": [],
     "REG_CHECK": [],
     "WMI_POLICY": [],
-    "SERVICE_POLICY": []
+    "SERVICE_POLICY": [],
+    "GUID_REGISTRY_SETTING": [] # Stores items related to GUID-based registry settings, common in v3 CIS benchmarks
 }
 
 
@@ -128,6 +131,10 @@ def find_element(audit: str) -> None:
         right_type = (right_type.group(1)).replace(
             '"', '') if right_type else None
 
+        # Extract GUID-based registry key if present
+        guid_reg_key = regexes['guid_reg_key'].search(item_str)
+        guid_reg_key = (guid_reg_key.group(1)).replace('"', '') if guid_reg_key else None
+
         # Clean the data
         if type == 'BANNER_CHECK':
             value_data = ''
@@ -167,7 +174,7 @@ def find_element(audit: str) -> None:
                 value_data = '[0..900]'
 
         data_dict[type].append([1, type, index, description, solution,
-                                reg_key, reg_item, reg_option, audit_policy_subcategory, right_type, value_data])
+                                reg_key, reg_item, reg_option, audit_policy_subcategory, right_type, value_data, guid_reg_key])
 
 
 def output_file(out_fname):
@@ -182,7 +189,7 @@ def output_file(out_fname):
 
     for type, data in data_dict.items():
         df = pd.DataFrame(data, columns=['Checklist', 'Type', 'Index', 'Description', 'Solution',
-                                         'Reg Key',  'Reg Item', 'Reg Option', 'Audit Policy Subcategory', 'Right type', 'Value Data'])
+                                         'Reg Key',  'Reg Item', 'Reg Option', 'Audit Policy Subcategory', 'Right type', 'Value Data', 'GUID Reg Key'])
         df.to_excel(writer, sheet_name=type, index=False)
 
     writer.close()
@@ -196,7 +203,7 @@ Parses command-line arguments for an audit file, processes the audit file, and s
 if __name__ == '__main__':
 
     my_parser = argparse.ArgumentParser(
-        description='This is a script for parsing audit files and generating an Excel file containing relevant data.')
+        description='This script parses CIS audit files (supports v2 and v3) and generates an Excel file. It extracts various policy settings, including GUID-based registry settings common in v3 benchmarks.')
 
     # Add the arguments
     my_parser.add_argument('-audit',
@@ -224,9 +231,11 @@ if __name__ == '__main__':
     data = find_element(audit)
 
     # save the data into an Excel file
-    # out_fname = 'src\win_server_2022_ms_v1.xlsx'
-    out_fname = 'src\\Audit\\' + \
-        src_fname.split("\\")[-1].replace("audit", "xlsx")
+    # Construct the output filename by taking the base name of the audit file,
+    # placing it in the 'src/Audit/' directory, and changing the extension to .xlsx.
+    # e.g., src/CIS/file.audit -> src/Audit/file.xlsx
+    base_name = os.path.basename(src_fname)
+    out_fname = os.path.join('src', 'Audit', base_name.replace("audit", "xlsx"))
 
     output_file(out_fname)
 
