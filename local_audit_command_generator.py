@@ -2,6 +2,7 @@ import pandas as pd
 import logging
 import argparse
 import sys
+import os
 
 
 def gen_ps_args(data_dict: dict) -> dict:
@@ -352,8 +353,10 @@ if __name__ == '__main__':
     ps_args_dict = gen_ps_args(data_dict)
 
     # save file
-    script_name = 'script\\' + \
-        fname.split("\\")[-1].replace("xlsx", "ps1")
+    output_dir = "script"
+    os.makedirs(output_dir, exist_ok=True) # Ensure the output directory exists
+    base_name = os.path.basename(fname)
+    script_name = os.path.join(output_dir, base_name.replace("xlsx", "ps1"))
 
     with open(script_name, 'w') as f:
         # get host name
@@ -367,4 +370,4 @@ if __name__ == '__main__':
             f.write(";")
             # print(cmd)
 
-    print("Done! File saved: %s", script_name)
+    print(f"Done! File saved: {script_name}")
