@@ -95,10 +95,10 @@ def compare_user_right_result(right_type, expected_value, actual_value):
                        "local account": "*S-1-5-113",
                        "window manager": "*S-1-5-90-0",
                        "window manager group": "*S-1-5-90-0",
-                       "window manager\window manager group": "*S-1-5-90-0",
+                       r"window manager\window manager group": "*S-1-5-90-0",
                        "nt service": "*S-1-5-80-3139157870-2983391045-3678747466-658725712-1809340420",
                        "wdiservicehost": "*S-1-5-80-3139157870-2983391045-3678747466-658725712-1809340420",
-                       "nt service\wdiservicehost": "*S-1-5-80-3139157870-2983391045-3678747466-658725712-1809340420"}
+                       r"nt service\wdiservicehost": "*S-1-5-80-3139157870-2983391045-3678747466-658725712-1809340420"}
 
     actual_set = set(actual_value.split(','))
     sid_set = set()
@@ -114,14 +114,14 @@ def compare_user_right_result(right_type, expected_value, actual_value):
 
         if right_type == 'SeIncreaseBasePriorityPrivilege':
             sid_set_list.append(set([user_right_dict['administrators'],
-                                user_right_dict["window manager\window manager group"]]))
+                                user_right_dict[r"window manager\window manager group"]]))
         elif right_type == 'SeCreateSymbolicLinkPrivilege':
             sid_set_list.append(set([user_right_dict['administrators']]))
             sid_set_list.append(
                 set([user_right_dict['administrators'], user_right_dict["virtual machines"]]))
         elif right_type == 'SeSystemProfilePrivilege':
             sid_set_list.append(set(
-                [user_right_dict['administrators'], user_right_dict["nt service\wdiservicehost"]]))
+                [user_right_dict['administrators'], user_right_dict[r"nt service\wdiservicehost"]]))
         elif right_type == 'SeSecurityPrivilege':
             sid_set_list.append(set([user_right_dict['administrators']]))
 
