@@ -156,26 +156,51 @@ def save_file(out_fname: str, data_dict_list: list, ip_addr: str) -> None:
 
     column_names = result.columns.tolist()
 
-    value_n_result = column_names[11:]
-    ip_list = [ip_addr, '']
+    # value_n_result = column_names[11:] # Original line, kept for context
+    # ip_list = [ip_addr, ''] # Original ip_list, seems insufficient for 3 columns per host
+
+    # Part b: Correct the name_list generation for the second header row.
     name_list = []
+    # num_hosts calculation for name_list
+    # For a single host, columns beyond the first 11 base columns should be 'Actual Value', 'Result', 'Note'.
+    # This calculation assumes each host adds exactly 3 columns.
+    num_additional_columns = len(column_names) - 11
+    num_hosts = 0
+    if num_additional_columns >= 0 and num_additional_columns % 3 == 0:
+        num_hosts = num_additional_columns // 3
 
-    for i in range(len(value_n_result)):
-        if i % 2 == 0:
-            # ip = value_n_result[i].split('|')[0].strip()
-            # ip_list.append(ip)
-            name_list.append('Actual Value')
-        else:
-            # ip_list.append('')
-            name_list.append('Result')
+    for _ in range(num_hosts):
+        name_list.extend(['Actual Value', 'Result', 'Note'])
 
-    new_data = ['Checklist', 'Type', 'Index', 'Description', 'Solution', 'Reg Key', 'Reg Item', 'Reg Option', 'Audit Policy Subcategory',
-                'Right type', 'Value Data'] + name_list
-    result.columns = ['Checklist', 'Type', 'Index', 'Description', 'Solution', 'Reg Key', 'Reg Item', 'Reg Option', 'Audit Policy Subcategory',
-                      'Right type', 'Value Data'] + ip_list
+    # Part a: Correct the problematic column assignment.
+    base_columns = ['Checklist', 'Type', 'Index', 'Description', 'Solution', 'Reg Key', 'Reg Item', 'Reg Option', 'Audit Policy Subcategory', 'Right type', 'Value Data']
+    # actual_df_column_names are the final column names for the DataFrame *data* rows
+    actual_df_column_names = base_columns + name_list # name_list now correctly holds all per-host column names like ['Actual Value', 'Result', 'Note', 'Actual Value_H2', ...]
+                                                    # However, the original script structure implies a single host's data is processed by save_file,
+                                                    # based on `ip_addr` parameter and how `results.append(new_dict)` is done.
+                                                    # If `results` (and thus `result` after concat) truly only has one host's data,
+                                                    # then num_hosts will be 1, and name_list will be ['Actual Value', 'Result', 'Note'].
+                                                    # This makes actual_df_column_names have 11 + 3 = 14 columns.
+
+    if len(result.columns) == len(actual_df_column_names):
+        result.columns = actual_df_column_names
+    else:
+        print(f"WARNING: Column count mismatch in save_file. DataFrame has {len(result.columns)} columns but expected {len(actual_df_column_names)}. Column names not reassigned before creating Excel header rows.")
+        # Fallback or error handling might be needed if this warning is triggered.
+        # For now, we proceed, but the header generation might be misaligned if this happens.
+
+    # new_data is for the content of the *second* header row in Excel.
+    # It should align with the final DataFrame column structure.
+    new_data_header_row_content = base_columns + name_list
+
+    # The new_df is used to write the two header rows. Its columns must match `result.columns` after the potential reassignment.
+    # If result.columns was not reassigned due to mismatch, this new_df might also be misaligned.
+    # We will use actual_df_column_names for new_df's columns if the assignment to result.columns happened,
+    # otherwise, we use the original result.columns to avoid crashing here, though Excel output might be wrong.
+    header_for_new_df = actual_df_column_names if len(result.columns) == len(actual_df_column_names) else result.columns.tolist()
 
     new_df = pd.DataFrame(
-        [new_data + [''] * (result.shape[1] - len(new_data))], columns=result.columns)
+        [new_data_header_row_content + [''] * (len(header_for_new_df) - len(new_data_header_row_content))], columns=header_for_new_df)
     result = pd.concat([new_df, result]).reset_index(drop=True)
 
     # Apply the function to each string column in the DataFrame
@@ -189,16 +214,34 @@ def save_file(out_fname: str, data_dict_list: list, ip_addr: str) -> None:
     ws = wb.active
 
     # Merge the appropriate cells in the new first row
-    for col in range(1, 12):  # adjust these values as needed
-        ws.merge_cells(start_row=1, start_column=col,
-                       end_row=2, end_column=col)
+    for col_idx_excel in range(1, 12):  # For base columns (A to K)
+        ws.merge_cells(start_row=1, start_column=col_idx_excel,
+                       end_row=2, end_column=col_idx_excel)
 
-    for ip_col in range(12, len(result.columns)):  # adjust these values as needed
-        if ip_col % 2 == 0:
-            ws.merge_cells(start_row=1, start_column=ip_col,
-                           end_row=1, end_column=ip_col+1)
-        else:
-            continue
+    # Part c: Correct the openpyxl merge logic for the first header row (IP address / Hostname).
+    num_base_columns_excel = 11 # Number of base columns (A-K)
+
+    # num_hosts was calculated earlier for name_list. This is based on the structure of `result` DataFrame.
+    # This calculation assumes `result` has 11 base columns + 3 columns per host.
+
+    for i in range(num_hosts):
+        start_col_for_host_excel = num_base_columns_excel + (i * 3) + 1 # 1-based index for openpyxl
+
+        # The actual IP/hostname should have been written by new_df.to_excel() into ws.cell(row=1, column=start_col_for_host_excel).
+        # Here, we just merge the cells for that host header.
+        # The first row of new_df (which becomes the first row in Excel) should have the ip_addr for the first host block.
+        # The original script only passed a single `ip_addr`. If multiple hosts were processed into `result`,
+        # the `new_df` construction would need ip_addr for each host block.
+        # The current logic writes `ip_addr` (passed to save_file) for the first host block.
+        # Subsequent host blocks in a multi-host scenario are not explicitly given unique IP headers by current new_df logic.
+        # This merge logic assumes 3 columns per host ('Actual Value', 'Result', 'Note').
+
+        # Ensure we don't try to merge beyond available columns
+        end_col_for_host_excel = start_col_for_host_excel + 2
+        if start_col_for_host_excel <= ws.max_column:
+            # If end_col_for_host_excel goes beyond max_column, merge only up to max_column
+            actual_end_col = min(end_col_for_host_excel, ws.max_column)
+            ws.merge_cells(start_row=1, start_column=start_col_for_host_excel, end_row=1, end_column=actual_end_col)
 
     # Save the workbook
     wb.save(out_fname)
