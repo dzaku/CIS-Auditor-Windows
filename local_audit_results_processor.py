@@ -124,8 +124,10 @@ def remove_illegal_chars(val: str) -> str:
 
 
 def save_file(out_fname: str, data_dict_list: list, ip_addr: str) -> None:
-    ''' 
+    '''
     This function processes the comparison results and saves them into an Excel file.
+    It now writes the main data first using pandas.ExcelWriter, starting from Excel row 3,
+    and then uses openpyxl to manually write the two header rows and apply merges.
 
     :param out_fname: 
         A string representing the filename of the output file.
@@ -152,101 +154,100 @@ def save_file(out_fname: str, data_dict_list: list, ip_addr: str) -> None:
 
     result = pd.concat(all_frames, axis=1)
 
-    result = result.loc[:, ~result.columns.duplicated()]
+    result = result.loc[:, ~result.columns.duplicated()] # Keep this, seems useful
 
-    column_names = result.columns.tolist()
+    # 1. Apply `remove_illegal_chars` carefully
+    for col in result.columns:
+        if result[col].dtype == 'object':
+            result[col] = result[col].map(remove_illegal_chars, na_action='ignore')
 
-    # value_n_result = column_names[11:] # Original line, kept for context
-    # ip_list = [ip_addr, ''] # Original ip_list, seems insufficient for 3 columns per host
+    # 2. Use `pandas.ExcelWriter` to write the data *without* pandas headers,
+    # starting from row 3 (Excel's 1-based indexing for startrow=2).
+    with pd.ExcelWriter(out_fname, engine='openpyxl') as writer:
+        result.to_excel(writer, index=False, header=False, sheet_name='Sheet1', startrow=2)
 
-    # Part b: Correct the name_list generation for the second header row.
-    name_list = []
-    # num_hosts calculation for name_list
-    # For a single host, columns beyond the first 11 base columns should be 'Actual Value', 'Result', 'Note'.
-    # This calculation assumes each host adds exactly 3 columns.
-    num_additional_columns = len(column_names) - 11
-    num_hosts = 0
-    if num_additional_columns >= 0 and num_additional_columns % 3 == 0:
-        num_hosts = num_additional_columns // 3
-
-    for _ in range(num_hosts):
-        name_list.extend(['Actual Value', 'Result', 'Note'])
-
-    # Part a: Correct the problematic column assignment.
-    base_columns = ['Checklist', 'Type', 'Index', 'Description', 'Solution', 'Reg Key', 'Reg Item', 'Reg Option', 'Audit Policy Subcategory', 'Right type', 'Value Data']
-    # actual_df_column_names are the final column names for the DataFrame *data* rows
-    actual_df_column_names = base_columns + name_list # name_list now correctly holds all per-host column names like ['Actual Value', 'Result', 'Note', 'Actual Value_H2', ...]
-                                                    # However, the original script structure implies a single host's data is processed by save_file,
-                                                    # based on `ip_addr` parameter and how `results.append(new_dict)` is done.
-                                                    # If `results` (and thus `result` after concat) truly only has one host's data,
-                                                    # then num_hosts will be 1, and name_list will be ['Actual Value', 'Result', 'Note'].
-                                                    # This makes actual_df_column_names have 11 + 3 = 14 columns.
-
-    if len(result.columns) == len(actual_df_column_names):
-        result.columns = actual_df_column_names
-    else:
-        print(f"WARNING: Column count mismatch in save_file. DataFrame has {len(result.columns)} columns but expected {len(actual_df_column_names)}. Column names not reassigned before creating Excel header rows.")
-        # Fallback or error handling might be needed if this warning is triggered.
-        # For now, we proceed, but the header generation might be misaligned if this happens.
-
-    # new_data is for the content of the *second* header row in Excel.
-    # It should align with the final DataFrame column structure.
-    new_data_header_row_content = base_columns + name_list
-
-    # The new_df is used to write the two header rows. Its columns must match `result.columns` after the potential reassignment.
-    # If result.columns was not reassigned due to mismatch, this new_df might also be misaligned.
-    # We will use actual_df_column_names for new_df's columns if the assignment to result.columns happened,
-    # otherwise, we use the original result.columns to avoid crashing here, though Excel output might be wrong.
-    header_for_new_df = actual_df_column_names if len(result.columns) == len(actual_df_column_names) else result.columns.tolist()
-
-    new_df = pd.DataFrame(
-        [new_data_header_row_content + [''] * (len(header_for_new_df) - len(new_data_header_row_content))], columns=header_for_new_df)
-    result = pd.concat([new_df, result]).reset_index(drop=True)
-
-    # Apply the function to each string column in the DataFrame
-    result = result.map(remove_illegal_chars)
-
-    # Save DataFrame to a new Excel file
-    result.to_excel(out_fname, index=False, engine='openpyxl')
-
-    # Load the workbook and select the sheet
+    # 3. Subsequent `openpyxl` logic for loading the workbook,
+    # writing the two header rows, and merging cells.
     wb = load_workbook(out_fname)
-    ws = wb.active
+    ws = wb.active # Should be 'Sheet1'
 
-    # Merge the appropriate cells in the new first row
-    for col_idx_excel in range(1, 12):  # For base columns (A to K)
-        ws.merge_cells(start_row=1, start_column=col_idx_excel,
-                       end_row=2, end_column=col_idx_excel)
+    # Define base column names (literal list)
+    base_column_names_literal = ['Checklist', 'Type', 'Index', 'Description', 'Solution', 'Reg Key', 'Reg Item', 'Reg Option', 'Audit Policy Subcategory', 'Right type', 'Value Data']
 
-    # Part c: Correct the openpyxl merge logic for the first header row (IP address / Hostname).
-    num_base_columns_excel = 11 # Number of base columns (A-K)
+    # Calculate num_hosts based on the 'result' DataFrame's columns (before it was written to Excel)
+    # This DataFrame `result` is the one containing only data, no headers yet.
+    num_base_cols = 11
+    num_result_cols_per_host = 3 # 'Actual Value', 'Result', 'Note'
+    num_hosts = 0
+    # Check if the number of additional columns is non-negative and a multiple of per-host columns
+    if (len(result.columns) - num_base_cols) >= 0 and \
+       (len(result.columns) - num_base_cols) % num_result_cols_per_host == 0:
+        num_hosts = (len(result.columns) - num_base_cols) // num_result_cols_per_host
+    else:
+        # This case implies the DataFrame `result` doesn't match the expected structure
+        # (11 base + 3*N host data columns).
+        # This could happen if `data_dict_list` had items with varying structures,
+        # or if `ip_addr` logic implies only one host but columns don't match.
+        # For now, proceed with num_hosts = 0 or log a warning.
+        # The current code for `all_frames.append(result_rowwise.reset_index(drop=True))` and
+        # `result = pd.concat(all_frames, axis=1)` suggests `result` could combine multiple hosts
+        # if `data_dict_list` had multiple items.
+        # However, the `main` block calls `save_file` with `results = [new_dict]`, meaning `data_dict_list` has one item.
+        # So, `result` should correspond to one host's data.
+        # Let's assume for a single host scenario, result.columns should be 11 + 3 = 14.
+        if len(result.columns) == num_base_cols + num_result_cols_per_host: # Exactly one host
+             num_hosts = 1
+        else:
+            print(f"WARNING: Column structure of 'result' DataFrame ({len(result.columns)} columns) does not match expected 11 base + 3*N host columns. Header generation might be incorrect.")
+            # If num_hosts remains 0, no host-specific headers will be written/merged.
 
-    # num_hosts was calculated earlier for name_list. This is based on the structure of `result` DataFrame.
-    # This calculation assumes `result` has 11 base columns + 3 columns per host.
-
+    # Header Row 1 content (IPs / Hostnames for result columns)
+    # For base columns, this row will effectively be empty where cells are merged vertically.
+    # The actual text for base columns in row 1 comes from header_row2_content before merging.
+    header_row1_excel_content = [''] * num_base_cols
     for i in range(num_hosts):
-        start_col_for_host_excel = num_base_columns_excel + (i * 3) + 1 # 1-based index for openpyxl
+        # Assuming ip_addr is for the first host. If multiple hosts, this needs adjustment.
+        current_ip_header = ip_addr if i == 0 else f"Host_{i+1}_IP_Placeholder"
+        header_row1_excel_content.extend([current_ip_header, '', '']) # IP spans 3 cells
 
-        # The actual IP/hostname should have been written by new_df.to_excel() into ws.cell(row=1, column=start_col_for_host_excel).
-        # Here, we just merge the cells for that host header.
-        # The first row of new_df (which becomes the first row in Excel) should have the ip_addr for the first host block.
-        # The original script only passed a single `ip_addr`. If multiple hosts were processed into `result`,
-        # the `new_df` construction would need ip_addr for each host block.
-        # The current logic writes `ip_addr` (passed to save_file) for the first host block.
-        # Subsequent host blocks in a multi-host scenario are not explicitly given unique IP headers by current new_df logic.
-        # This merge logic assumes 3 columns per host ('Actual Value', 'Result', 'Note').
+    # Header Row 2 content (Actual column titles)
+    header_row2_excel_content = list(base_column_names_literal) # Make a mutable copy
+    for _ in range(num_hosts):
+        header_row2_excel_content.extend(['Actual Value', 'Result', 'Note'])
 
-        # Ensure we don't try to merge beyond available columns
-        end_col_for_host_excel = start_col_for_host_excel + 2
-        if start_col_for_host_excel <= ws.max_column:
-            # If end_col_for_host_excel goes beyond max_column, merge only up to max_column
-            actual_end_col = min(end_col_for_host_excel, ws.max_column)
-            ws.merge_cells(start_row=1, start_column=start_col_for_host_excel, end_row=1, end_column=actual_end_col)
+    # Write Header Row 1 cells (content for this row)
+    for col_idx, cell_value in enumerate(header_row1_excel_content):
+        # For base columns, the visual text in row 1 will be the base_column_name after merge.
+        # So, write the base_column_name into row 1 for base columns.
+        if col_idx < num_base_cols:
+            ws.cell(row=1, column=col_idx + 1, value=base_column_names_literal[col_idx])
+        else: # For host-specific columns, write the IP/host identifier.
+            ws.cell(row=1, column=col_idx + 1, value=cell_value)
 
-    # Save the workbook
+    # Write Header Row 2 cells (content for this row)
+    for col_idx, cell_value in enumerate(header_row2_excel_content):
+         ws.cell(row=2, column=col_idx + 1, value=cell_value)
+
+    # Perform merges for headers
+    # Vertically merge cells for base column headers (A1:A2, B1:B2, ..., K1:K2)
+    for col_idx_plus_1 in range(1, num_base_cols + 1):
+        ws.merge_cells(start_row=1, start_column=col_idx_plus_1, end_row=2, end_column=col_idx_plus_1)
+
+    # Horizontally merge cells for each host's IP/Hostname header (e.g., L1:N1 for first host)
+    for i in range(num_hosts):
+        start_col_for_host_excel = num_base_cols + (i * num_result_cols_per_host) + 1
+        end_col_for_host_excel = start_col_for_host_excel + num_result_cols_per_host - 1
+
+        if start_col_for_host_excel <= ws.max_column: # Ensure start column is valid
+            # Adjust end_col if it exceeds current max_column (though ws.max_column might be based on data written)
+            # It's safer to merge based on calculated end_col_for_host_excel, assuming data columns exist
+            actual_end_col = min(end_col_for_host_excel, len(header_row1_excel_content)) # Max theoretical columns based on headers
+            if actual_end_col >= start_col_for_host_excel :
+                 ws.merge_cells(start_row=1, start_column=start_col_for_host_excel, end_row=1, end_column=actual_end_col)
+
+    # Save the workbook with new headers
     wb.save(out_fname)
-    print((f"Result saved into {out_fname}"))
-
+    print(f"Result saved into {out_fname}")
     logging.info(f"Result saved into {out_fname}")
 
 
