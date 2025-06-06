@@ -99,7 +99,7 @@ def read_file(fname: str) -> dict:
     for ptype in data_dict:
         try:
             df0 = xl.parse(sheet_name=ptype)
-            data_dict[ptype] = df0.applymap(remove_illegal_chars)
+            data_dict[ptype] = df0.map(remove_illegal_chars)
         except ValueError as e:
             logging.error(f"{ptype} not found")
 
@@ -204,10 +204,10 @@ def save_file(out_fname: str, data_dict_list: list, ip_addr: str) -> None:
     result = pd.concat([new_df, result]).reset_index(drop=True)
 
     # Apply the function to each string column in the DataFrame
-    result = result.applymap(remove_illegal_chars)
+    result = result.map(remove_illegal_chars)
 
     # Save DataFrame to a new Excel file
-    result.to_excel(out_fname, index=False)
+    result.to_excel(out_fname, index=False, engine='openpyxl')
 
     # Load the workbook and select the sheet
     wb = load_workbook(out_fname)
